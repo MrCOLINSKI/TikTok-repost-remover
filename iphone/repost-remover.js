@@ -337,6 +337,12 @@ async function attempt(item){
     catch(e){
       err=e.message;
       say('  try '+a+' of '+ATTEMPTS+': '+err,'warn');
+      /* Repost is a toggle. If we already tapped it, trying again could put
+         the repost straight back on - so stop and let it be checked by hand. */
+      if(e.tapped){
+        say('  not retrying: check this one yourself','warn');
+        return {res:null,err:err};
+      }
       if(a<ATTEMPTS)await wait(rnd(700,1500));
     }
   }
@@ -551,44 +557,76 @@ async function locateRepost(scope){
   return null;
 }
 
+/* Everything we can read off a control, used to notice that it changed even
+   when we cannot understand what it says. */
+function sigOf(el){
+  if(!el)return '';
+  var cls='';
+  try{
+    cls=(el.className&&el.className.baseVal!==undefined?el.className.baseVal:el.className||'').toString();
+  }catch(e){}
+  var txt='';
+  try{txt=(el.innerText||'').slice(0,30);}catch(e){}
+  return [el.getAttribute('aria-pressed')||'',el.getAttribute('aria-label')||'',
+          el.getAttribute('data-e2e')||'',txt,cls].join('~');
+}
+
+/* Thrown once we have tapped repost but cannot confirm the outcome. Repost is
+   a TOGGLE: tapping again could put the repost back. Never retry after this. */
+function Untapped(msg){var e=new Error(msg);e.tapped=false;return e;}
+function Tapped(msg){var e=new Error(msg);e.tapped=true;return e;}
+
 async function removeOne(item){
   var priorPath=location.pathname;
-  tap(item.el);
-  var scope=await until(videoOpen,6000);
-  if(!scope)throw new Error('video view did not open');
-  /* Landing on a feed means the wrong video can be under the controls. If the
-     URL names a video, it must be the one we opened - refuse rather than
-     un-repost a stranger's video. */
-  var id=shortId(item.url);
-  if(location.pathname.indexOf('/video/')>=0&&location.pathname.indexOf(id)<0){
+  try{
+    tap(item.el);
+    var scope=await until(videoOpen,6000);
+    if(!scope)throw Untapped('video view did not open');
+    /* Landing on a feed means the wrong video can be under the controls. If
+       the URL names a video, it must be the one we opened - refuse rather
+       than un-repost a stranger's video. */
+    var id=shortId(item.url);
+    if(location.pathname.indexOf('/video/')>=0&&location.pathname.indexOf(id)<0){
+      throw Untapped('landed on a different video');
+    }
+    var btn=await locateRepost(scope);
+    if(!btn)throw Untapped('repost button not found');
+    if(isReposted(btn)===false)return 'already';
+
+    var before=sigOf(btn);
+    tap(btn);
+    /* Some layouts ask to confirm. Look briefly, and only click something
+       that actually reads like a confirmation. */
+    var dlg=await until(function(){
+      var d=pick(S.confirmBtn);
+      if(!d)return null;
+      var t=((d.textContent||'')+' '+(d.getAttribute('aria-label')||'')).toLowerCase();
+      return (t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0)?d:null;
+    },900);
+    if(dlg)tap(dlg);
+
+    /* Best evidence: the control now reads as not-reposted. */
+    var flipped=await until(function(){
+      var b=repostIn(videoOpen()||scope);
+      return (b&&isReposted(b)===false)?b:null;
+    },2500);
+    if(flipped)return 'ok';
+
+    /* Fallback: we cannot read this layout's wording, but if everything we
+       can see about the control changed, something happened. */
+    var changed=await until(function(){
+      var b=repostIn(videoOpen()||scope);
+      return (b&&sigOf(b)!==before)?b:null;
+    },1500);
+    if(changed)return 'ok';
+
+    throw Tapped('tapped, but could not confirm - not retrying a toggle');
+  }finally{
+    /* Always get back to the grid, including after a failure. Without this a
+       failed removal leaves the run stranded on the video, and the next
+       attempt acts on whatever is on screen. */
     await closeModal(priorPath);
-    throw new Error('landed on a different video');
   }
-  var btn=await locateRepost(scope);
-  if(!btn)throw new Error('repost button not found');
-  if(isReposted(btn)===false){await closeModal(priorPath);return 'already';}
-
-  tap(btn);
-  /* Some layouts ask to confirm. Look briefly, and only click something that
-     actually reads like a confirmation. */
-  var dlg=await until(function(){
-    var d=pick(S.confirmBtn);
-    if(!d)return null;
-    var t=((d.textContent||'')+' '+(d.getAttribute('aria-label')||'')).toLowerCase();
-    return (t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0)?d:null;
-  },900);
-  if(dlg)tap(dlg);
-
-  /* Success is the state flipping, nothing else. */
-  var flipped=await until(function(){
-    var b=repostIn(videoOpen()||scope);
-    return (b&&isReposted(b)===false)?b:null;
-  },2500);
-  await closeModal(priorPath);
-  if(flipped)return 'ok';
-  var last=repostIn(videoOpen()||scope);
-  if(!last||isReposted(last)===null)throw new Error('could not verify it flipped');
-  throw new Error('still reposted after tapping');
 }
 /* priorPath is where we were BEFORE opening this video. Going back is only
    safe if opening actually pushed a history entry - otherwise history.back()
