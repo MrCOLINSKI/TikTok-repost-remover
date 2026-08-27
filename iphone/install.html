@@ -1,0 +1,450 @@
+<title>Repost Remover for iPhone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --ground:      #eef1f5;
+  --surface:     #ffffff;
+  --surface-alt: #e4e9ef;
+  --ink:         #131820;
+  --ink-soft:    #4d5765;
+  --ink-faint:   #7c8798;
+  --rule:        #cfd6df;
+  --accent:      #c81f4e;
+  --accent-ink:  #ffffff;
+  --signal:      #0d6f78;
+  --warn-bg:     #fdf2d9;
+  --warn-ink:    #6b4a05;
+  --warn-rule:   #e3c274;
+
+  --step: clamp(1.6rem, 1.35rem + 1.1vw, 2.05rem);
+  --lede: clamp(1.02rem, 0.98rem + 0.3vw, 1.12rem);
+}
+:root:not([data-theme="light"]) {
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground:      #0e1116;
+    --surface:     #171c23;
+    --surface-alt: #1f262f;
+    --ink:         #e7ebf1;
+    --ink-soft:    #a3aebd;
+    --ink-faint:   #77838f;
+    --rule:        #2c343e;
+    --accent:      #ff5d80;
+    --accent-ink:  #22060f;
+    --signal:      #45c9cf;
+    --warn-bg:     #2a2113;
+    --warn-ink:    #f0d59a;
+    --warn-rule:   #5c4a24;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground:      #0e1116;
+  --surface:     #171c23;
+  --surface-alt: #1f262f;
+  --ink:         #e7ebf1;
+  --ink-soft:    #a3aebd;
+  --ink-faint:   #77838f;
+  --rule:        #2c343e;
+  --accent:      #ff5d80;
+  --accent-ink:  #22060f;
+  --signal:      #45c9cf;
+  --warn-bg:     #2a2113;
+  --warn-ink:    #f0d59a;
+  --warn-rule:   #5c4a24;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 35rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 1rem + 3vw, 3rem) clamp(1rem, 0.6rem + 2vw, 1.75rem) 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0;
+}
+
+h1 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: clamp(2.1rem, 1.6rem + 2.4vw, 3rem);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+  margin: 0.4rem 0 0;
+}
+
+h2 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.32rem;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+  margin: 0;
+}
+
+h3 {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+p { margin: 0; }
+.lede { font-size: var(--lede); color: var(--ink-soft); margin-top: 0.9rem; }
+
+header { display: flex; flex-direction: column; }
+
+.hero-note {
+  margin-top: 1.4rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+/* ---- the one action the page exists for ---- */
+.action {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+button.copy {
+  appearance: none;
+  width: 100%;
+  min-height: 3.4rem;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -0.008em;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+button.copy:hover { filter: brightness(1.07); }
+button.copy:active { transform: scale(0.985); }
+button.copy:focus-visible { outline: 3px solid var(--signal); outline-offset: 3px; }
+button.copy[data-state="done"] { background: var(--signal); color: var(--accent-ink); }
+
+.action .meta {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+details {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.85rem;
+}
+summary {
+  cursor: pointer;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+textarea.raw {
+  width: 100%;
+  height: 9rem;
+  margin-top: 0.75rem;
+  padding: 0.7rem;
+  background: var(--surface-alt);
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+/* ---- steps: a real sequence, so the numerals earn their place ---- */
+.steps { display: flex; flex-direction: column; gap: 1.1rem; list-style: none; margin: 0; padding: 0; }
+
+.step {
+  display: grid;
+  grid-template-columns: 2.6rem 1fr;
+  gap: 0.25rem 0.9rem;
+  align-items: baseline;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 1.05rem 1.15rem;
+}
+.step .num {
+  grid-row: 1 / span 2;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: var(--step);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.step p { color: var(--ink-soft); font-size: 0.95rem; margin-top: 0.3rem; }
+
+kbd {
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 0.88em;
+  background: var(--surface-alt);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 0.08em 0.4em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+code {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--surface-alt);
+  border-radius: 4px;
+  padding: 0.08em 0.32em;
+}
+
+section { display: flex; flex-direction: column; gap: 1rem; }
+
+.callout {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-rule);
+  border-radius: 12px;
+  padding: 1.05rem 1.15rem;
+  color: var(--warn-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.callout h3 { color: var(--warn-ink); }
+.callout p { font-size: 0.93rem; }
+
+.facts { display: flex; flex-direction: column; gap: 0.7rem; margin: 0; padding: 0; list-style: none; }
+.facts li {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+.facts li::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-top: 0.48rem;
+  border-radius: 2px;
+  background: var(--signal);
+}
+.facts li.minus::before { background: var(--ink-faint); }
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.25rem;
+  color: var(--ink-faint);
+  font-size: 0.87rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+footer a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+
+<div class="page">
+
+  <header>
+    <p class="eyebrow">Phone only · no computer needed</p>
+    <h1>Remove your TikTok reposts from Safari</h1>
+    <p class="lede">This installs a bookmark that isn't a web page — it's a small
+      program. Tap it while you're on TikTok and a control panel slides up from the
+      bottom, scans your reposts, and takes them off one at a time.</p>
+    <p class="hero-note">It runs inside the tab you're already logged into. It never
+      asks for your password, and nothing it does leaves your phone.</p>
+  </header>
+
+  <div class="action">
+    <button class="copy" id="copyBtn" type="button">Copy the bookmark</button>
+    <div class="meta">
+      <span id="size">—</span>
+      <span>starts with <code>javascript:</code></span>
+    </div>
+    <details>
+      <summary>Copy it by hand instead</summary>
+      <textarea class="raw" id="raw" readonly spellcheck="false"></textarea>
+    </details>
+  </div>
+
+  <section>
+    <h2>Put it in your bookmarks</h2>
+    <ol class="steps">
+      <li class="step">
+        <span class="num">01</span>
+        <h3>Copy the code above</h3>
+        <p>Tap the button. If it refuses, open <em>Copy it by hand</em>, tap inside
+          the box, then <kbd>Select All</kbd> and <kbd>Copy</kbd>.</p>
+      </li>
+      <li class="step">
+        <span class="num">02</span>
+        <h3>Bookmark any page</h3>
+        <p>In Safari, tap <kbd>Share</kbd> → <kbd>Add Bookmark</kbd>. Name it
+          <em>Remove reposts</em> and save it to Favorites so it's quick to reach.</p>
+      </li>
+      <li class="step">
+        <span class="num">03</span>
+        <h3>Edit that bookmark</h3>
+        <p>Tap the open-book icon → <kbd>Edit</kbd> → tap the bookmark you just made.</p>
+      </li>
+      <li class="step">
+        <span class="num">04</span>
+        <h3>Replace the address</h3>
+        <p>Clear the address field, paste, and tap <kbd>Done</kbd>. If Safari eats the
+          <code>javascript:</code> at the front, type those characters back in yourself —
+          it won't run without them.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Run it</h2>
+    <ol class="steps">
+      <li class="step">
+        <span class="num">05</span>
+        <h3>Open your own profile</h3>
+        <p>Go to tiktok.com in Safari, logged in, and tap through to your profile. The
+          address needs to start with <code>/@</code> — the panel checks.</p>
+      </li>
+      <li class="step">
+        <span class="num">06</span>
+        <h3>Tap the bookmark</h3>
+        <p>Open the bookmarks list and tap <em>Remove reposts</em>. The panel appears at
+          the bottom of the page.</p>
+      </li>
+      <li class="step">
+        <span class="num">07</span>
+        <h3>Scan, then Remove all</h3>
+        <p>Scan opens your Reposts tab and scrolls to the end, collecting everything
+          first. Then confirm the count and let it work.</p>
+      </li>
+    </ol>
+  </section>
+
+  <div class="callout">
+    <h3>Turn off Auto-Lock before a long run</h3>
+    <p><kbd>Settings</kbd> → <kbd>Display &amp; Brightness</kbd> → <kbd>Auto-Lock</kbd> →
+      <kbd>Never</kbd>. Safari freezes timers when your screen locks or you switch apps,
+      which stalls the run partway through.</p>
+    <p>If it does stall, nothing is lost — it remembers what already came off. Scan
+      again and it picks up where it stopped.</p>
+  </div>
+
+  <section>
+    <h2>How it behaves</h2>
+    <ul class="facts">
+      <li>Collects the whole list before removing anything.</li>
+      <li>One at a time, with a random 3–8 second gap. Never in parallel.</li>
+      <li>Checks the repost actually came off before counting it — a tap that quietly
+        did nothing is recorded as a failure, not a success.</li>
+      <li>Three tries each, then it marks that one failed and carries on. One failure
+        never ends the run.</li>
+      <li>Stops at 200 per run by default. You can change that in the panel.</li>
+      <li>Remembers what it removed, so a second run skips those and retries the
+        failures.</li>
+      <li class="minus">Slower and more fragile than the desktop version, which drives a
+        real browser and can verify more.</li>
+      <li class="minus">If a scan finds nothing, TikTok has changed its page structure.
+        That's a fix that needs a computer.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>Source, and the desktop app this is a stand-in for:
+      <a href="https://github.com/MrCOLINSKI/TikTok-repost-remover/tree/claude/tiktok-repost-removal-app-rapgqj">github.com/MrCOLINSKI/TikTok-repost-remover</a></p>
+    <p>Removing reposts can't be undone from here. If you'd rather not automate it:
+      Profile → Reposts → open a video → Share → Remove repost.</p>
+  </footer>
+</div>
+
+<script type="text/plain" id="payload">javascript:(function(){ "use strict"; if(window.__ttrr){window.__ttrr.show();return;} var S={ repostTab:['[data-e2e="repost-tab"]','p[data-e2e="repost-tab"]','span[data-e2e="repost-tab"]'], tile:['[data-e2e="user-post-item"] a[href*="/video/"]','[data-e2e="user-post-item-list"] a[href*="/video/"]','a[href*="/video/"]'], modal:['[data-e2e="browse-video"]','div[role="dialog"]','[class*="ModalContainer"]','[id^="tux-portal"] div[role="dialog"]'], repostBtn:['[data-e2e="repost-icon"]','button[data-e2e="repost-icon"]','div[data-e2e="repost-icon"]','[data-e2e="browse-repost"]','button[aria-label*="epost"]','div[aria-label*="epost"]'], confirmBtn:['button[data-e2e="repost-remove-confirm"]','div[role="dialog"] button','[class*="Modal"] button'], closeModal:['[data-e2e="browse-close"]','[data-e2e="modal-close-inner-button"]','button[aria-label*="lose"]','div[aria-label*="lose"]'] }; var ACTIVE=['undo','remove','reposted','cancel']; var LEDGER_KEY='ttrr_removed_v1'; var MIN_DELAY=3000,MAX_DELAY=8000,ATTEMPTS=3,DEFAULT_CAP=200; var stopped=false,running=false,found=[],stats={done:0,ok:0,fail:0,skip:0,total:0}; function vis(el){if(!el)return false;var r=el.getBoundingClientRect();return r.width>0&&r.height>0;} function pick(list,root){ root=root||document; for(var i=0;i<list.length;i++){ var els=root.querySelectorAll(list[i]); for(var j=0;j<els.length;j++){if(vis(els[j]))return els[j];} } return null; } function pickAll(list,root){ root=root||document; for(var i=0;i<list.length;i++){ var els=root.querySelectorAll(list[i]); if(els.length)return Array.prototype.slice.call(els); } return []; } function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});} async function wait(ms){ var step=200,waited=0; while(waited<ms){ if(stopped)return false; await sleep(Math.min(step,ms-waited)); waited+=step; } return true; } function rnd(a,b){return Math.floor(a+Math.random()*(b-a));} function tap(el){ if(!el)return; el.scrollIntoView({block:'center'}); ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){ el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window})); }); } function ledger(){ try{return JSON.parse(localStorage.getItem(LEDGER_KEY)||'[]');}catch(e){return [];} } function remember(url){ try{ var l=ledger(); if(l.indexOf(url)<0){l.push(url);localStorage.setItem(LEDGER_KEY,JSON.stringify(l));} }catch(e){} } var ui={}; function build(){ var wrap=document.createElement('div'); wrap.setAttribute('style',[ 'position:fixed','left:0','right:0','bottom:0','z-index:2147483647', 'background:rgb(15,16,20)','color:rgb(232,234,239)', 'font:14px/1.45 -apple-system,system-ui,sans-serif', 'border-top:1px solid rgb(48,52,66)', 'box-shadow:0 -8px 30px rgba(0,0,0,0.5)', 'padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px))', 'max-height:62vh','overflow:auto','-webkit-overflow-scrolling:touch' ].join(';')); var head=document.createElement('div'); head.setAttribute('style','display:flex;align-items:center;gap:8px;margin-bottom:10px'); var title=document.createElement('b'); title.textContent='Repost remover'; title.setAttribute('style','font-size:14px;flex:1'); var hide=document.createElement('button'); hide.textContent='Hide'; head.appendChild(title);head.appendChild(hide); var stat=document.createElement('div'); stat.setAttribute('style','font-variant-numeric:tabular-nums;color:rgb(154,161,177);margin-bottom:8px'); var barOuter=document.createElement('div'); barOuter.setAttribute('style','height:6px;background:rgb(28,30,38);border-radius:99px;overflow:hidden;margin-bottom:10px'); var barInner=document.createElement('i'); barInner.setAttribute('style','display:block;height:6px;width:100vw;transform:scaleX(0);transform-origin:left;background:linear-gradient(90deg,rgb(37,244,238),rgb(254,44,85));transition:transform .25s'); barOuter.appendChild(barInner); var row=document.createElement('div'); row.setAttribute('style','display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px'); function mk(label,bg,fg){ var b=document.createElement('button'); b.textContent=label; b.setAttribute('style',[ 'flex:1 1 auto','min-height:46px','min-width:96px','padding:0 14px', 'border-radius:10px','border:1px solid rgb(48,52,66)','font:inherit', 'font-weight:600','background:'+bg,'color:'+fg,'touch-action:manipulation' ].join(';')); return b; } var bScan=mk('Scan','rgb(34,38,52)','rgb(232,234,239)'); var bRun=mk('Remove all','rgb(254,44,85)','rgb(255,255,255)'); var bStop=mk('Stop','transparent','rgb(232,234,239)'); hide.setAttribute('style','min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgb(48,52,66);background:transparent;color:rgb(154,161,177);font:inherit'); row.appendChild(bScan);row.appendChild(bRun);row.appendChild(bStop); var capRow=document.createElement('div'); capRow.setAttribute('style','display:flex;align-items:center;gap:8px;margin-bottom:10px;color:rgb(154,161,177)'); var capLbl=document.createElement('span');capLbl.textContent='Cap per run'; var cap=document.createElement('input'); cap.type='number';cap.value=String(DEFAULT_CAP);cap.min='1'; cap.setAttribute('style','width:92px;min-height:42px;padding:0 10px;border-radius:9px;border:1px solid rgb(48,52,66);background:rgb(20,22,28);color:inherit;font-size:16px'); capRow.appendChild(capLbl);capRow.appendChild(cap); var logBox=document.createElement('div'); logBox.setAttribute('style','height:132px;overflow:auto;background:rgb(10,11,15);border:1px solid rgb(38,42,54);border-radius:9px;padding:8px;font:11.5px/1.4 ui-monospace,Menlo,monospace;-webkit-overflow-scrolling:touch'); wrap.appendChild(head);wrap.appendChild(stat);wrap.appendChild(barOuter); wrap.appendChild(row);wrap.appendChild(capRow);wrap.appendChild(logBox); document.body.appendChild(wrap); ui={wrap:wrap,stat:stat,bar:barInner,log:logBox,cap:cap,scan:bScan,run:bRun,stop:bStop,hide:hide}; bScan.onclick=function(){doScan();}; bRun.onclick=function(){doRun();}; bStop.onclick=function(){stopped=true;say('Stopping after this one.','warn');}; hide.onclick=function(){ var body=[stat,barOuter,row,capRow,logBox]; var hidden=logBox.style.display==='none'; body.forEach(function(n){n.style.display=hidden?'':'none';}); hide.textContent=hidden?'Hide':'Show'; }; } function say(msg,level){ var c=level==='ok'?'rgb(74,222,128)':level==='err'?'rgb(248,113,113)':level==='warn'?'rgb(251,191,36)':'rgb(199,204,218)'; var d=document.createElement('div'); d.setAttribute('style','color:'+c+';white-space:pre-wrap;word-break:break-word'); d.textContent=new Date().toLocaleTimeString()+' '+msg; ui.log.appendChild(d); while(ui.log.childNodes.length>400)ui.log.removeChild(ui.log.firstChild); ui.log.scrollTop=ui.log.scrollHeight; } function refresh(){ ui.stat.textContent=stats.done+' of '+stats.total+' ok '+stats.ok+' failed '+stats.fail+' skipped '+stats.skip; var f=stats.total?stats.done/stats.total:0; ui.bar.style.transform='scaleX('+f+')'; ui.run.disabled=running||!found.length; ui.scan.disabled=running; ui.run.style.opacity=ui.run.disabled?'0.45':'1'; ui.scan.style.opacity=ui.scan.disabled?'0.45':'1'; } function isReposted(btn){ if(!btn)return null; var p=btn.getAttribute('aria-pressed'); if(p==='true')return true; if(p==='false')return false; var probes=[btn.getAttribute('aria-label'),btn.getAttribute('title'),btn.textContent]; for(var i=0;i<probes.length;i++){ var t=(probes[i]||'').toLowerCase(); if(!t)continue; for(var j=0;j<ACTIVE.length;j++){if(t.indexOf(ACTIVE[j])>=0)return true;} if(t.indexOf('repost')>=0)return false; } var cls=(btn.className&&btn.className.baseVal!==undefined?btn.className.baseVal:btn.className||'').toString().toLowerCase(); if(cls.indexOf('active')>=0||cls.indexOf('reposted')>=0)return true; return null; } async function doScan(){ if(running)return; running=true;found=[];stats={done:0,ok:0,fail:0,skip:0,total:0};stopped=false;refresh(); try{ if(location.pathname.indexOf('/@')!==0){ say('Open YOUR profile first (the Profile tab), then Scan.','err'); return; } var tab=pick(S.repostTab); if(tab){tap(tab);say('Opened the Reposts tab.');await wait(2500);} else say('No Reposts tab found - scanning whatever grid is showing.','warn'); var seen={},stagnant=0; while(stagnant<4&&!stopped){ var links=pickAll(S.tile); var added=0; for(var i=0;i<links.length;i++){ var href=(links[i].href||'').split('?')[0]; if(href&&href.indexOf('/video/')>0&&!seen[href]){ seen[href]=true;found.push({url:href,el:links[i]});added++; } } if(added){stagnant=0;say('Found '+found.length+' so far.');} else stagnant++; stats.total=found.length;refresh(); window.scrollBy(0,window.innerHeight*2); await wait(1400); } say('Scan done: '+found.length+' reposts.','ok'); }catch(e){say('Scan failed: '+e.message,'err');} finally{running=false;stats.total=found.length;refresh();} } async function removeOne(item){ tap(item.el); await wait(1800); var modal=pick(S.modal)||document; var btn=pick(S.repostBtn,modal)||pick(S.repostBtn); if(!btn)throw new Error('repost button not found'); if(isReposted(btn)===false){await closeModal();return 'already';} tap(btn); await wait(1200); var dlg=pick(S.confirmBtn); if(dlg){ var t=(dlg.textContent||'').toLowerCase(); if(t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0){tap(dlg);await wait(1200);} } var after=isReposted(pick(S.repostBtn,pick(S.modal)||document)||pick(S.repostBtn)); await closeModal(); if(after===false)return 'ok'; if(after===null)throw new Error('could not verify it flipped'); throw new Error('still reposted after tapping'); } async function closeModal(){ var c=pick(S.closeModal); if(c)tap(c); else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await wait(900); } async function doRun(){ if(running||!found.length)return; var cap=Math.max(1,parseInt(ui.cap.value,10)||DEFAULT_CAP); var already=ledger(); var queue=found.filter(function(f){return already.indexOf(f.url)<0;}); stats.skip=found.length-queue.length; if(queue.length>cap){say('Cap '+cap+' - '+(queue.length-cap)+' left for next time.');queue=queue.slice(0,cap);} if(!confirm('Remove '+queue.length+' repost'+(queue.length===1?'':'s')+' from your account. This cannot be undone.'))return; running=true;stopped=false; stats.done=0;stats.ok=0;stats.fail=0;stats.total=queue.length;refresh(); say('Keep this tab open and your screen awake.','warn'); for(var i=0;i<queue.length;i++){ if(stopped){say('Stopped.','warn');break;} var item=queue[i],res=null,err=''; say('['+(i+1)+' of '+queue.length+'] '+item.url.split('/video/')[1]); for(var a=1;a<=ATTEMPTS;a++){ if(stopped)break; try{res=await removeOne(item);break;} catch(e){err=e.message;say(' try '+a+' of '+ATTEMPTS+': '+err,'warn');if(a<ATTEMPTS)await wait(rnd(2000,4000));} } if(stopped&&!res)break; stats.done++; if(res==='ok'||res==='already'){stats.ok++;remember(item.url);say(' removed','ok');} else{stats.fail++;say(' failed: '+err,'err');} refresh(); if(i<queue.length-1&&!stopped){ var d=rnd(MIN_DELAY,MAX_DELAY); say(' waiting '+Math.round(d/1000)+'s'); await wait(d); } } running=false;refresh(); say('Finished. '+stats.ok+' removed, '+stats.fail+' failed.','ok'); say('Pull down to refresh the page, then Scan again to check.','info'); } build(); window.__ttrr={show:function(){ui.wrap.style.display='';}}; say('Ready. Go to your profile, tap Scan.'); say('Removed before, on this phone: '+ledger().length); refresh(); })();</script>
+<script>
+(function () {
+  var payload = document.getElementById('payload').textContent.trim();
+  var raw = document.getElementById('raw');
+  var btn = document.getElementById('copyBtn');
+  raw.value = payload;
+  document.getElementById('size').textContent =
+    (payload.length / 1024).toFixed(1) + ' KB · ' + payload.length + ' characters';
+
+  function flash(label, state) {
+    btn.textContent = label;
+    btn.setAttribute('data-state', state);
+    setTimeout(function () {
+      btn.textContent = 'Copy the bookmark';
+      btn.removeAttribute('data-state');
+    }, 2200);
+  }
+
+  btn.addEventListener('click', async function () {
+    try {
+      await navigator.clipboard.writeText(payload);
+      flash('Copied — now step 02', 'done');
+      return;
+    } catch (e) { /* fall through to the manual path */ }
+    try {
+      raw.focus();
+      raw.setSelectionRange(0, raw.value.length);
+      if (document.execCommand('copy')) { flash('Copied — now step 02', 'done'); return; }
+    } catch (e) {}
+    var d = raw.closest('details');
+    if (d) d.open = true;
+    raw.focus();
+    raw.setSelectionRange(0, raw.value.length);
+    flash('Safari blocked it — copy below', 'manual');
+  });
+})();
+</script>
