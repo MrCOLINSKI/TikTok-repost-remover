@@ -27,22 +27,37 @@ those eleven characters back in by hand at the front.
 1. Safari → **tiktok.com**, logged in.
 2. Go to **your own profile** (the URL has to start with `/@`).
 3. Tap the bookmarks icon → tap **Remove reposts**. The panel appears.
-4. **Scan** — opens your Reposts tab and collects up to 40 at a time.
-5. **Remove 1** for one repost per tap, or **Remove batch** for the whole
-   scanned batch.
-6. When the batch is clear, **reload the page**, tap the bookmark, and scan
-   again for the next 40.
+4. **Remove all** — one continuous run. It works through what's on screen,
+   scrolls for more, and keeps going until the feed runs out or it hits the
+   **Max** you set. No scanning first, no stopping every 40.
 
-### Why it works in batches
+**Scan** is now only for previewing what's there, and **Remove 1** for taking
+off a single repost — useful for checking it actually works before turning it
+loose.
 
-iOS Safari kills a tab that runs out of memory, and every tile TikTok's feed
-loads holds a video decoder. Scrolling an entire Reposts feed in one go will
-crash the tab on a large account — so a scan stops at 40, the panel drops the
-video sources it can as it scrolls, and reloading between batches hands the
-memory back.
+### Pace
 
-If it still gets sluggish, use **Remove 1**. It touches the least, and you set
-the pace.
+| Setting | Gap between removals | For |
+|---|---|---|
+| Turbo | 0.2–0.5 s | Clearing hundreds, accepting the risk |
+| Fast | 0.8–1.6 s | The default. Quick, still human-ish |
+| Safe | 3–8 s | Deliberately slow |
+
+The gap is the only thing separating this from hammering TikTok as fast as the
+network allows. Turbo on a large account is the most likely way to get rate
+limited or temporarily blocked — that's your call to make, but it is a real
+one. If removals suddenly start failing in a run, that's the signal: stop, wait
+a while, and come back at Fast or Safe.
+
+### Why it no longer stops every 40
+
+Each tile is removed from the page once it's done, so the grid never grows and
+memory stays flat. That's what makes a long continuous run survive on a phone —
+earlier versions had to stop and reload to hand memory back.
+
+Waits are also condition-based now: it continues the moment the video view
+opens, rather than sleeping a fixed two seconds every time. On a big account
+that alone is most of the speedup.
 
 **Set Auto-Lock to Never first** (Settings → Display & Brightness → Auto-Lock).
 Safari pauses timers when the screen locks or you switch apps, which stalls the

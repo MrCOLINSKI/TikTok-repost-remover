@@ -28,7 +28,13 @@ var S={
 };
 var ACTIVE=['undo','remove','reposted','cancel'];
 var LEDGER_KEY='ttrr_removed_v1';
-var MIN_DELAY=3000,MAX_DELAY=8000,ATTEMPTS=3,DEFAULT_CAP=25;
+/* Pace between removals. Slower is gentler on TikTok's rate limiting; faster
+   is what you want when there are hundreds to clear. Pick in the panel. */
+var SPEEDS={safe:[3000,8000],fast:[800,1600],turbo:[200,500]};
+var speed='fast';
+var ATTEMPTS=3,DEFAULT_CAP=500;
+/* How many tiles to work through before scrolling for more. */
+var WINDOW=12;
 /* iOS Safari kills the tab when memory runs out, and every tile the feed
    loads holds a video decoder. So scan a batch, clear it, reload, repeat -
    never the whole feed at once. */
@@ -68,6 +74,23 @@ async function wait(ms){
   return true;
 }
 function rnd(a,b){return Math.floor(a+Math.random()*(b-a));}
+/* Wait for a thing to be true rather than for a fixed number of seconds.
+   This is where nearly all the speed comes from: the old code slept 1.8s for
+   a modal that usually appears in 200ms, on every single repost. */
+async function until(fn,ms,step){
+  step=step||120;
+  var waited=0;
+  while(waited<ms){
+    if(stopped)return null;
+    var v=null;
+    try{v=fn();}catch(e){}
+    if(v)return v;
+    await sleep(step);
+    waited+=step;
+  }
+  return null;
+}
+function pace(){var s=SPEEDS[speed]||SPEEDS.fast;return rnd(s[0],s[1]);}
 /* The single biggest memory win on iOS: drop the decoder behind every video
    the feed has loaded. TikTok reattaches a source when one is actually
    played, so this only reclaims what is sitting idle in the grid. */
@@ -208,7 +231,7 @@ function build(){
   }
   var bScan=mk('Scan','rgb(34,38,52)','rgb(232,234,239)');
   var bOne=mk('Remove 1','rgb(34,38,52)','rgb(232,234,239)');
-  var bRun=mk('Remove batch','rgb(254,44,85)','rgb(255,255,255)');
+  var bRun=mk('Remove all','rgb(254,44,85)','rgb(255,255,255)');
   var bStop=mk('Stop','transparent','rgb(232,234,239)');
   bOne.style.borderColor='rgb(254,44,85)';
   var smallBtn='min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgb(48,52,66);background:transparent;color:rgb(154,161,177);font:inherit';
@@ -218,12 +241,22 @@ function build(){
   row.appendChild(bScan);row.appendChild(bOne);row.appendChild(bRun);row.appendChild(bStop);
 
   var capRow=document.createElement('div');
-  capRow.setAttribute('style','display:flex;align-items:center;gap:8px;margin-bottom:10px;color:rgb(154,161,177)');
-  var capLbl=document.createElement('span');capLbl.textContent='Cap per run';
+  capRow.setAttribute('style','display:flex;align-items:center;gap:8px;margin-bottom:10px;color:rgb(154,161,177);flex-wrap:wrap');
+  var capLbl=document.createElement('span');capLbl.textContent='Max';
   var cap=document.createElement('input');
   cap.type='number';cap.value=String(DEFAULT_CAP);cap.min='1';
-  cap.setAttribute('style','width:92px;min-height:42px;padding:0 10px;border-radius:9px;border:1px solid rgb(48,52,66);background:rgb(20,22,28);color:inherit;font-size:16px');
+  var fieldCss='min-height:42px;padding:0 10px;border-radius:9px;border:1px solid rgb(48,52,66);background:rgb(20,22,28);color:inherit;font-size:16px';
+  cap.setAttribute('style','width:84px;'+fieldCss);
+  var spdLbl=document.createElement('span');spdLbl.textContent='Pace';
+  var spd=document.createElement('select');
+  spd.setAttribute('style','width:126px;'+fieldCss);
+  [['turbo','Turbo 0.2-0.5s'],['fast','Fast 0.8-1.6s'],['safe','Safe 3-8s']].forEach(function(o){
+    var op=document.createElement('option');op.value=o[0];op.textContent=o[1];spd.appendChild(op);
+  });
+  spd.value=speed;
+  spd.onchange=function(){speed=spd.value;say('Pace: '+speed);};
   capRow.appendChild(capLbl);capRow.appendChild(cap);
+  capRow.appendChild(spdLbl);capRow.appendChild(spd);
 
   var logBox=document.createElement('div');
   logBox.setAttribute('style','height:132px;overflow:auto;background:rgb(10,11,15);border:1px solid rgb(38,42,54);border-radius:9px;padding:8px;font:11.5px/1.4 ui-monospace,Menlo,monospace;-webkit-overflow-scrolling:touch');
@@ -232,11 +265,12 @@ function build(){
   wrap.appendChild(row);wrap.appendChild(capRow);wrap.appendChild(logBox);
   document.body.appendChild(wrap);
 
-  ui={wrap:wrap,stat:stat,bar:barInner,log:logBox,cap:cap,scan:bScan,one:bOne,run:bRun,stop:bStop,hide:hide};
+  ui={wrap:wrap,stat:stat,bar:barInner,log:logBox,cap:cap,spd:spd,
+      scan:bScan,one:bOne,run:bRun,stop:bStop,hide:hide};
 
   bScan.onclick=function(){doScan();};
   bOne.onclick=function(){doOne();};
-  bRun.onclick=function(){doRun();};
+  bRun.onclick=function(){doAll();};
   bStop.onclick=function(){stopped=true;say('Stopping after this one.','warn');};
   hide.onclick=function(){
     var body=[stat,barOuter,row,capRow,logBox];
@@ -260,8 +294,9 @@ function refresh(){
   ui.stat.textContent=stats.done+' done   ok '+stats.ok+'   failed '+stats.fail+'   left '+left;
   var f=stats.total?stats.done/stats.total:0;
   ui.bar.style.transform='scaleX('+f+')';
-  ui.run.disabled=running||!left;
-  ui.one.disabled=running||!left;
+  /* Remove all collects its own tiles, so it never waits on a scan. */
+  ui.run.disabled=running;
+  ui.one.disabled=running;
   ui.scan.disabled=running;
   [ui.run,ui.one,ui.scan].forEach(function(b){b.style.opacity=b.disabled?'0.45':'1';});
 }
@@ -283,7 +318,7 @@ async function attempt(item){
     catch(e){
       err=e.message;
       say('  try '+a+' of '+ATTEMPTS+': '+err,'warn');
-      if(a<ATTEMPTS)await wait(rnd(2000,4000));
+      if(a<ATTEMPTS)await wait(rnd(700,1500));
     }
   }
   return {res:null,err:err};
@@ -330,14 +365,18 @@ async function doProbe(){
 async function doOne(){
   if(running)return;
   var q=pending();
-  if(!q.length){say('Nothing left in this batch. Reload and scan again.','warn');return;}
+  if(!q.length)q=collect(1);
+  if(!q.length){say('Nothing found. Open your Reposts tab, or reload.','warn');return;}
   running=true;stopped=false;refresh();
   var item=q[0];
-  say('Removing '+shortId(item.url)+'  ('+q.length+' left)');
-  try{record(item,await attempt(item));}
+  say('Removing '+shortId(item.url));
+  try{
+    var out=await attempt(item);
+    record(item,out);
+    if(out.res)pruneTile(item);
+  }
   catch(e){say('Failed: '+e.message,'err');}
   running=false;refresh();
-  if(!pending().length)say('Batch clear. Reload the page, then scan again.','ok');
 }
 
 /* ---- is this repost currently on ---- */
@@ -400,20 +439,19 @@ async function doScan(){
 /* ---- remove one, using the in-page modal so we never navigate away ---- */
 /* Named selectors first, then the search by meaning, then the share menu -
    on some layouts Repost only exists inside the share sheet. */
-async function locateRepost(){
+function repostIn(scope){
+  return pick(S.repostBtn,scope)||findByWord('repost',scope);
+}
+async function locateRepost(scope){
   /* Search inside the opened video only. A page-wide search finds the
      profile's own controls and produces confident nonsense. */
-  var scope=pick(S.modal);
   if(!scope)return null;
-  var btn=pick(S.repostBtn,scope)||findByWord('repost',scope);
+  var btn=repostIn(scope);
   if(btn)return btn;
   var share=pick(S.shareBtn,scope)||findByWord('share',scope);
   if(share){
-    say('  no repost control - opening share');
     tap(share);
-    await wait(1400);
-    scope=pick(S.modal)||scope;
-    btn=pick(S.repostBtn,scope)||findByWord('repost',scope);
+    btn=await until(function(){return repostIn(pick(S.modal)||scope);},2500);
     if(btn)return btn;
   }
   return null;
@@ -421,61 +459,116 @@ async function locateRepost(){
 
 async function removeOne(item){
   tap(item.el);
-  await wait(1800);
-  if(!pick(S.modal))throw new Error('video view did not open');
-  var btn=await locateRepost();
+  var scope=await until(function(){return pick(S.modal);},6000);
+  if(!scope)throw new Error('video view did not open');
+  var btn=await locateRepost(scope);
   if(!btn)throw new Error('repost button not found');
   if(isReposted(btn)===false){await closeModal();return 'already';}
+
   tap(btn);
-  await wait(1200);
+  /* Some layouts ask to confirm. Look briefly, and only click something that
+     actually reads like a confirmation. */
+  var dlg=await until(function(){
+    var d=pick(S.confirmBtn);
+    if(!d)return null;
+    var t=((d.textContent||'')+' '+(d.getAttribute('aria-label')||'')).toLowerCase();
+    return (t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0)?d:null;
+  },900);
+  if(dlg)tap(dlg);
 
-  var dlg=pick(S.confirmBtn);
-  if(dlg){
-    var t=(dlg.textContent||'').toLowerCase();
-    if(t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0){tap(dlg);await wait(1200);}
-  }
-
-  var after=isReposted(await locateRepost());
+  /* Success is the state flipping, nothing else. */
+  var flipped=await until(function(){
+    var b=repostIn(pick(S.modal)||scope);
+    return (b&&isReposted(b)===false)?b:null;
+  },2500);
   await closeModal();
-  if(after===false)return 'ok';
-  if(after===null)throw new Error('could not verify it flipped');
+  if(flipped)return 'ok';
+  var last=repostIn(pick(S.modal)||scope);
+  if(!last||isReposted(last)===null)throw new Error('could not verify it flipped');
   throw new Error('still reposted after tapping');
 }
 async function closeModal(){
   var c=pick(S.closeModal);
   if(c)tap(c);
   else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-  await wait(900);
+  await until(function(){return !pick(S.modal);},2500);
 }
 
 /* ---- the run ---- */
-async function doRun(){
-  if(running||!found.length)return;
+/* Take a processed tile out of the DOM. This is what keeps a long run from
+   crashing: the grid never grows, so memory stays flat and there is no need
+   to stop and reload every 40. */
+function pruneTile(item){
+  try{
+    var n=item.el;
+    for(var i=0;i<4&&n&&n.parentNode;i++){
+      var e2e=(n.getAttribute&&n.getAttribute('data-e2e'))||'';
+      if(e2e.indexOf('user-post-item')>=0)break;
+      n=n.parentNode;
+    }
+    if(n&&n.parentNode)n.parentNode.removeChild(n);
+    else if(item.el&&item.el.parentNode)item.el.parentNode.removeChild(item.el);
+  }catch(e){}
+}
+
+/* Grab the next few tiles on screen that still need doing. */
+function collect(limit){
+  var already=ledger(),out=[],links=pickAll(S.tile);
+  for(var i=0;i<links.length&&out.length<limit;i++){
+    var href=(links[i].href||'').split('?')[0];
+    if(!href||href.indexOf('/video/')<0)continue;
+    if(already.indexOf(href)>=0||failedHere[href])continue;
+    if(out.some(function(o){return o.url===href;}))continue;
+    out.push({url:href,el:links[i]});
+  }
+  return out;
+}
+
+/* One continuous pass: work the tiles on screen, drop them, scroll for more,
+   keep going until the feed runs out or the cap is hit. */
+async function doAll(){
+  if(running)return;
   var cap=Math.max(1,parseInt(ui.cap.value,10)||DEFAULT_CAP);
-  var queue=pending();
-  if(queue.length>cap){say('Cap '+cap+' - '+(queue.length-cap)+' left for the next batch.');queue=queue.slice(0,cap);}
-  if(!confirm('Remove '+queue.length+' repost'+(queue.length===1?'':'s')+' from your account. This cannot be undone.'))return;
+  if(!confirm('Remove up to '+cap+' reposts from your account, as fast as the '+
+              speed+' setting allows. This cannot be undone.'))return;
 
   running=true;stopped=false;
-  stats.done=0;stats.ok=0;stats.fail=0;stats.total=queue.length;refresh();
-  say('Keep this tab open and your screen awake.','warn');
+  stats={done:0,ok:0,fail:0,skip:0,total:cap};
+  found=[];refresh();
 
-  for(var i=0;i<queue.length;i++){
-    if(stopped){say('Stopped.','warn');break;}
-    var item=queue[i];
-    say('['+(i+1)+' of '+queue.length+'] '+shortId(item.url));
-    var out=await attempt(item);
-    if(stopped&&!out.res)break;
-    record(item,out);
-    if(i<queue.length-1&&!stopped){
-      var d=rnd(MIN_DELAY,MAX_DELAY);
-      say('  waiting '+Math.round(d/1000)+'s');
-      await wait(d);
+  var tab=pick(S.repostTab);
+  if(tab){tap(tab);await wait(1500);}
+  say('Running at '+speed+' pace. Keep this tab open and the screen awake.','warn');
+
+  var idle=0,started=Date.now();
+  while(!stopped&&stats.done<cap&&idle<6){
+    var batch=collect(WINDOW);
+    if(!batch.length){
+      window.scrollBy(0,window.innerHeight*2);
+      await wait(900);
+      freeVideos();
+      idle++;
+      continue;
     }
+    idle=0;
+    for(var i=0;i<batch.length&&!stopped&&stats.done<cap;i++){
+      var item=batch[i];
+      found.push(item);
+      say('['+(stats.done+1)+'] '+shortId(item.url));
+      var out=await attempt(item);
+      if(stopped&&!out.res)break;
+      record(item,out);
+      pruneTile(item);
+      if(!stopped&&stats.done<cap)await wait(pace());
+    }
+    freeVideos();
   }
+
   running=false;refresh();
-  say('Batch done. '+stats.ok+' removed, '+stats.fail+' failed.','ok');
-  say('Reload the page, then tap the bookmark and Scan for the next batch.','info');
+  var mins=(Date.now()-started)/60000;
+  var rate=mins>0?Math.round(stats.ok/mins):0;
+  say('Done. '+stats.ok+' removed, '+stats.fail+' failed, about '+rate+' per minute.','ok');
+  if(idle>=6)say('No more reposts loading. Reload and run again to be sure.','info');
 }
 
 build();
