@@ -340,18 +340,24 @@ async function doProbe(){
   running=true;stopped=false;refresh();
   try{
     say('Probe: opening '+shortId(q[0].url));
+    var before=location.pathname;
     tap(q[0].el);
     await wait(2200);
     var modal=pick(S.modal);
-    say('modal found: '+(modal?'yes':'no - searching whole page'));
-    var hits=candidates(modal||document).filter(function(n){
+    var scope=videoOpen();
+    say('named modal: '+(modal?'yes':'no'));
+    say('url changed: '+(location.pathname!==before?'yes, now '+location.pathname.slice(0,40):'no'));
+    say('video view detected: '+(scope?scope.tagName.toLowerCase()+
+        (scope.getAttribute&&scope.getAttribute('data-e2e')?' data-e2e='+scope.getAttribute('data-e2e'):''):'NO'));
+    say('big video on screen: '+(document.querySelectorAll('video').length?'yes':'no'));
+    var hits=candidates(scope||document).filter(function(n){
       return matches(n,'repost')||matches(n,'share')||matches(n,'like')||matches(n,'favorite');
     });
     hits.sort(function(a,b){return a.querySelectorAll('*').length-b.querySelectorAll('*').length;});
     say('controls matched: '+hits.length);
     for(var i=0;i<Math.min(hits.length,10);i++)say('  '+describe(hits[i]));
     if(!hits.length){
-      var all=candidates(modal||document).filter(function(n){return n.getAttribute('data-e2e');});
+      var all=candidates(scope||document).filter(function(n){return n.getAttribute('data-e2e');});
       say('no matches. data-e2e values present: '+all.length);
       for(var j=0;j<Math.min(all.length,14);j++)say('  '+all[j].getAttribute('data-e2e'));
     }
@@ -364,6 +370,7 @@ async function doProbe(){
    the pace - the safest mode on a phone that has been crashing. */
 async function doOne(){
   if(running)return;
+  homePath=location.pathname;
   var q=pending();
   if(!q.length)q=collect(1);
   if(!q.length){say('Nothing found. Open your Reposts tab, or reload.','warn');return;}
@@ -439,6 +446,33 @@ async function doScan(){
 /* ---- remove one, using the in-page modal so we never navigate away ---- */
 /* Named selectors first, then the search by meaning, then the share menu -
    on some layouts Repost only exists inside the share sheet. */
+/* Where the profile grid lives, so we can tell "a video is open" from "we are
+   still looking at the profile". Set when a run starts. */
+var homePath=location.pathname;
+
+/* TikTok opens a repost in one of two shapes, and which one you get depends
+   on the layout it served you:
+     1. an overlay/modal on top of the profile, or
+     2. a pushState navigation to /video/<id> with no page reload.
+   Neither is reliably identifiable by a class name, so detect the video view
+   by what is true of it rather than by what it is called. */
+function videoOpen(){
+  var m=pick(S.modal);
+  if(m)return m;
+  if(location.pathname.indexOf('/video/')>=0)return document.body;
+  var vids=document.querySelectorAll('video');
+  for(var i=0;i<vids.length;i++){
+    var v=vids[i];
+    if(!vis(v))continue;
+    var r=v.getBoundingClientRect();
+    if(r.height<200)continue;              /* a grid thumbnail, not the player */
+    var n=v;
+    for(var k=0;k<6&&n.parentNode&&n.parentNode!==document.body;k++)n=n.parentNode;
+    return n;
+  }
+  return null;
+}
+
 function repostIn(scope){
   return pick(S.repostBtn,scope)||findByWord('repost',scope);
 }
@@ -451,7 +485,7 @@ async function locateRepost(scope){
   var share=pick(S.shareBtn,scope)||findByWord('share',scope);
   if(share){
     tap(share);
-    btn=await until(function(){return repostIn(pick(S.modal)||scope);},2500);
+    btn=await until(function(){return repostIn(videoOpen()||scope);},2500);
     if(btn)return btn;
   }
   return null;
@@ -459,7 +493,7 @@ async function locateRepost(scope){
 
 async function removeOne(item){
   tap(item.el);
-  var scope=await until(function(){return pick(S.modal);},6000);
+  var scope=await until(videoOpen,6000);
   if(!scope)throw new Error('video view did not open');
   var btn=await locateRepost(scope);
   if(!btn)throw new Error('repost button not found');
@@ -478,20 +512,29 @@ async function removeOne(item){
 
   /* Success is the state flipping, nothing else. */
   var flipped=await until(function(){
-    var b=repostIn(pick(S.modal)||scope);
+    var b=repostIn(videoOpen()||scope);
     return (b&&isReposted(b)===false)?b:null;
   },2500);
   await closeModal();
   if(flipped)return 'ok';
-  var last=repostIn(pick(S.modal)||scope);
+  var last=repostIn(videoOpen()||scope);
   if(!last||isReposted(last)===null)throw new Error('could not verify it flipped');
   throw new Error('still reposted after tapping');
 }
 async function closeModal(){
+  /* If opening the video pushed a new URL, the way back is history, not a
+     close button - and we must actually get back, or every later tap lands
+     on a page with no grid. */
+  if(location.pathname.indexOf('/video/')>=0&&location.pathname!==homePath){
+    history.back();
+    await until(function(){return location.pathname.indexOf('/video/')<0;},3000);
+    await until(function(){return pickAll(S.tile).length>0;},3000);
+    return;
+  }
   var c=pick(S.closeModal);
   if(c)tap(c);
   else document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-  await until(function(){return !pick(S.modal);},2500);
+  await until(function(){return !videoOpen();},2500);
 }
 
 /* ---- the run ---- */
@@ -528,6 +571,7 @@ function collect(limit){
    keep going until the feed runs out or the cap is hit. */
 async function doAll(){
   if(running)return;
+  homePath=location.pathname;
   var cap=Math.max(1,parseInt(ui.cap.value,10)||DEFAULT_CAP);
   if(!confirm('Remove up to '+cap+' reposts from your account, as fast as the '+
               speed+' setting allows. This cannot be undone.'))return;
