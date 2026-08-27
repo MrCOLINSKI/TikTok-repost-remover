@@ -1,0 +1,12 @@
+# Persistent Playwright profile — contains your logged-in TikTok session.
+# NEVER commit this.
+tiktok-profile/
+
+# Run ledger
+removed.jsonl
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store

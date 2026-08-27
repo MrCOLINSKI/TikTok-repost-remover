@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TikTok Repost Remover</title>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #171922; --line: #262a36; --text: #e7e9ee;
+    --muted: #9aa1b1; --accent: #25f4ee; --pink: #fe2c55;
+    --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .local { font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+           padding: 2px 8px; border-radius: 999px; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px 24px 40px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .1em;
+              color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    background: #222634; color: var(--text); border: 1px solid var(--line);
+    padding: 9px 14px; border-radius: 8px; font: inherit; font-weight: 550; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: #3a4152; background: #272c3c; }
+  button:disabled { opacity: .42; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #05202070; color: #062024; border-color: transparent; }
+  button.danger { background: var(--pink); color: #fff; border-color: transparent; }
+  button.ghost { background: transparent; }
+  input[type=number] {
+    background: #10121a; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; width: 92px; font: inherit;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.off { background: var(--err); }
+  #statusline { display: flex; align-items: center; gap: 8px; font-weight: 550; }
+  #statusdetail { color: var(--muted); font-weight: 400; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 8px; }
+  .stat { background: #10121a; border: 1px solid var(--line); border-radius: 9px; padding: 10px; }
+  .stat b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+  .bar { height: 7px; background: #10121a; border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
+  .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--pink)); transition: width .25s; }
+  .current { font-size: 12px; color: var(--muted); margin-top: 8px; word-break: break-all; min-height: 18px; }
+  #list, #log {
+    height: 300px; overflow-y: auto; background: #0b0c11; border: 1px solid var(--line);
+    border-radius: 9px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  }
+  #list a { color: var(--accent); text-decoration: none; display: block; padding: 2px 0; word-break: break-all; }
+  #list a:hover { text-decoration: underline; }
+  .line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+  .line.success { color: var(--ok); } .line.warn { color: var(--warn); }
+  .line.error { color: var(--err); } .line.info { color: #c7ccda; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+           border-radius: 12px; padding: 20px; max-width: 420px; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+</style>
+</head>
+<body>
+<header>
+  <h1>TikTok Repost Remover</h1>
+  <span class="local">127.0.0.1:8731 · local only</span>
+  <div id="statusline" style="margin-left:auto">
+    <span class="dot" id="dot"></span><span id="statustext">checking…</span>
+    <span id="statusdetail"></span>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Controls</h2>
+    <div class="row">
+      <button id="btnLogin" class="primary">Log in to TikTok</button>
+      <button id="btnScan">Scan reposts</button>
+      <button id="btnRemove" class="danger" disabled>Remove all</button>
+      <button id="btnStop" class="ghost" disabled>Stop</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label for="cap" style="color:var(--muted)">Cap per run</label>
+      <input type="number" id="cap" value="200" min="1" max="10000">
+      <span class="hint" style="margin:0">3–8s random delay, sequential</span>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><b id="sProcessed">0</b><span>Processed</span></div>
+      <div class="stat"><b id="sTotal">0</b><span>Total</span></div>
+      <div class="stat"><b id="sOk" style="color:var(--ok)">0</b><span>Success</span></div>
+      <div class="stat"><b id="sFail" style="color:var(--err)">0</b><span>Failed</span></div>
+    </div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="current" id="current"></div>
+    <p class="hint">Log in by hand in the Chromium window this app opens. Your
+      password is never seen, stored, or sent by this app. The session lives in
+      <code>./tiktok-profile</code>; results append to <code>removed.jsonl</code>.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Reposts <span id="listCount" style="color:var(--text)"></span></h2>
+    <div id="list"><span style="color:var(--muted)">No scan yet.</span></div>
+  </section>
+
+  <section class="panel" style="grid-column: 1 / -1">
+    <h2>Log</h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<dialog id="confirm">
+  <h3 style="margin:0 0 8px">Remove reposts?</h3>
+  <p id="confirmText" style="color:var(--muted)"></p>
+  <div class="row" style="justify-content:flex-end;margin-top:16px">
+    <button id="cancelBtn" class="ghost">Cancel</button>
+    <button id="goBtn" class="danger">Remove them</button>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+let state = {};
+
+function setStatus(s) {
+  state = s;
+  const dot = $('dot');
+  dot.className = 'dot ' + (s.logged_in ? 'on' : 'off');
+  $('statustext').textContent = s.logged_in ? 'Logged in' : 'Logged out';
+  $('statusdetail').textContent =
+    (s.username ? '· ' + s.username + ' ' : '') +
+    (s.phase && s.phase !== 'idle' ? '· ' + s.phase : '');
+
+  const busy = !!s.busy;
+  $('btnLogin').disabled = busy;
+  $('btnScan').disabled = busy;
+  $('btnRemove').disabled = busy || !s.scan_complete || !s.scanned_count;
+  $('btnStop').disabled = !busy;
+
+  $('sProcessed').textContent = s.processed || 0;
+  $('sTotal').textContent = s.total || 0;
+  $('sOk').textContent = s.success || 0;
+  $('sFail').textContent = s.failed || 0;
+  const pct = s.total ? Math.round((s.processed / s.total) * 100) : 0;
+  $('bar').style.width = pct + '%';
+  $('current').textContent = s.current_url ? 'Current: ' + s.current_url : '';
+  if (typeof s.cap === 'number' && document.activeElement !== $('cap')) $('cap').value = s.cap;
+}
+
+function addLog(msg, level) {
+  const el = document.createElement('div');
+  el.className = 'line ' + (level || 'info');
+  el.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  const box = $('log');
+  const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.appendChild(el);
+  while (box.childNodes.length > 1000) box.removeChild(box.firstChild);
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+
+function renderList(urls) {
+  const box = $('list');
+  box.innerHTML = '';
+  $('listCount').textContent = urls.length ? '(' + urls.length + ')' : '';
+  if (!urls.length) { box.innerHTML = '<span style="color:var(--muted)">No reposts found.</span>'; return; }
+  const frag = document.createDocumentFragment();
+  urls.forEach(u => {
+    const a = document.createElement('a');
+    a.href = u; a.target = '_blank'; a.rel = 'noreferrer'; a.textContent = u;
+    frag.appendChild(a);
+  });
+  box.appendChild(frag);
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!r.ok) {
+    let d = await r.text();
+    try { d = JSON.parse(d).detail || d; } catch (e) {}
+    addLog('Request failed: ' + d, 'error');
+    return null;
+  }
+  return r.json();
+}
+
+$('btnLogin').onclick = () => post('/api/login');
+$('btnScan').onclick = () => { renderList([]); post('/api/scan'); };
+$('btnStop').onclick = () => post('/api/stop');
+
+$('btnRemove').onclick = () => {
+  const cap = Math.max(1, parseInt($('cap').value, 10) || 200);
+  const n = Math.min(state.scanned_count || 0, cap);
+  $('confirmText').textContent =
+    'This will remove ' + n + ' repost' + (n === 1 ? '' : 's') +
+    ' from your account (' + (state.scanned_count || 0) + ' scanned, cap ' + cap +
+    '). Already-removed URLs in removed.jsonl are skipped. This cannot be undone by this app.';
+  $('confirm').showModal();
+};
+$('cancelBtn').onclick = () => $('confirm').close();
+$('goBtn').onclick = () => {
+  $('confirm').close();
+  post('/api/remove', { cap: Math.max(1, parseInt($('cap').value, 10) || 200) });
+};
+
+const es = new EventSource('/api/events');
+es.onmessage = e => {
+  const d = JSON.parse(e.data);
+  if (d.kind === 'log') addLog(d.message, d.level);
+  else if (d.kind === 'progress') setStatus(d);
+  else if (d.kind === 'scan_result') renderList(d.urls || []);
+};
+es.onerror = () => addLog('Event stream disconnected — retrying…', 'warn');
+
+async function poll() {
+  try { setStatus(await (await fetch('/api/status')).json()); } catch (e) {}
+}
+poll();
+setInterval(poll, 4000);
+fetch('/api/reposts').then(r => r.json()).then(d => { if (d.count) renderList(d.urls); });
+</script>
+</body>
+</html>
