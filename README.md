@@ -7,6 +7,10 @@ By default it binds `127.0.0.1` only. With `--phone` it serves itself on your
 home network so you can **drive it from your iPhone** — see
 [Using it from your iPhone](#using-it-from-your-iphone).
 
+**No computer at all?** There's a bookmarklet that runs entirely on the phone,
+inside Safari: [`iphone/`](iphone/). Slower and more fragile than this app, but
+it needs nothing but the phone.
+
 ## What it does
 
 1. Opens a **headed** Chromium window (Playwright) using a persistent profile in
