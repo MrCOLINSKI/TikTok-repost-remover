@@ -404,7 +404,7 @@ async function doProbe(){
       say('no share control found either','err');
     }
     say('Screenshot this and send it back.','ok');
-    await closeModal();
+    await closeModal(before);
   }catch(e){say('Probe failed: '+e.message,'err');}
   running=false;refresh();
 }
@@ -552,6 +552,7 @@ async function locateRepost(scope){
 }
 
 async function removeOne(item){
+  var priorPath=location.pathname;
   tap(item.el);
   var scope=await until(videoOpen,6000);
   if(!scope)throw new Error('video view did not open');
@@ -560,12 +561,12 @@ async function removeOne(item){
      un-repost a stranger's video. */
   var id=shortId(item.url);
   if(location.pathname.indexOf('/video/')>=0&&location.pathname.indexOf(id)<0){
-    await closeModal();
+    await closeModal(priorPath);
     throw new Error('landed on a different video');
   }
   var btn=await locateRepost(scope);
   if(!btn)throw new Error('repost button not found');
-  if(isReposted(btn)===false){await closeModal();return 'already';}
+  if(isReposted(btn)===false){await closeModal(priorPath);return 'already';}
 
   tap(btn);
   /* Some layouts ask to confirm. Look briefly, and only click something that
@@ -583,19 +584,31 @@ async function removeOne(item){
     var b=repostIn(videoOpen()||scope);
     return (b&&isReposted(b)===false)?b:null;
   },2500);
-  await closeModal();
+  await closeModal(priorPath);
   if(flipped)return 'ok';
   var last=repostIn(videoOpen()||scope);
   if(!last||isReposted(last)===null)throw new Error('could not verify it flipped');
   throw new Error('still reposted after tapping');
 }
-async function closeModal(){
-  /* If opening the video pushed a new URL, the way back is history, not a
-     close button - and we must actually get back, or every later tap lands
-     on a page with no grid. */
-  if(location.pathname.indexOf('/video/')>=0&&location.pathname!==homePath){
-    history.back();
-    await until(function(){return location.pathname.indexOf('/video/')<0;},3000);
+/* priorPath is where we were BEFORE opening this video. Going back is only
+   safe if opening actually pushed a history entry - otherwise history.back()
+   walks off the profile entirely, one page per removal, which is how a run
+   ends up sitting on the search page. */
+async function closeModal(priorPath){
+  var pushed=priorPath&&location.pathname!==priorPath;
+  if(pushed){
+    /* Opening can push more than one entry, so step back until the profile is
+       actually back - but never more than a few times, and never past it. */
+    for(var i=0;i<3&&location.pathname!==priorPath;i++){
+      history.back();
+      await until(function(){return location.pathname===priorPath;},2500);
+    }
+    if(location.pathname!==priorPath){
+      stopped=true;
+      say('Lost the profile page, so stopping rather than wandering off '+
+          'through your history. Open your Reposts tab and run again.','err');
+      return;
+    }
     await until(function(){return pickAll(S.tile).length>0;},3000);
     return;
   }
@@ -650,6 +663,11 @@ async function doAll(){
 
   var tab=findRepostTab();
   if(tab){tap(tab);await wait(1500);}
+  if(!pickAll(S.tile).length){
+    running=false;refresh();
+    say('No videos on this page. Open your own profile first.','err');
+    return;
+  }
   say('Running at '+speed+' pace. Keep this tab open and the screen awake.','warn');
 
   var idle=0,started=Date.now();
