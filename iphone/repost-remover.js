@@ -369,7 +369,9 @@ async function doProbe(){
     say('url changed: '+(location.pathname!==before?'yes, now '+location.pathname.slice(0,40):'no'));
     say('video view detected: '+(scope?scope.tagName.toLowerCase()+
         (scope.getAttribute&&scope.getAttribute('data-e2e')?' data-e2e='+scope.getAttribute('data-e2e'):''):'NO'));
-    say('big video on screen: '+(document.querySelectorAll('video').length?'yes':'no'));
+    say('videos in page: '+document.querySelectorAll('video').length+
+        ' (a feed shows several at once)');
+    say('scope has its own share: '+(hasShare(scope)?'yes':'no'));
     var hits=candidates(scope||document).filter(function(n){
       return matches(n,'repost')||matches(n,'share')||matches(n,'like')||matches(n,'favorite');
     });
@@ -497,20 +499,37 @@ var homePath=location.pathname;
      2. a pushState navigation to /video/<id> with no page reload.
    Neither is reliably identifiable by a class name, so detect the video view
    by what is true of it rather than by what it is called. */
+function hasShare(n){
+  if(!n||!n.querySelector)return false;
+  return !!(n.querySelector('[data-e2e*="share"]')||n.querySelector('[aria-label*="hare"]'));
+}
 function videoOpen(){
   var m=pick(S.modal);
   if(m)return m;
-  if(location.pathname.indexOf('/video/')>=0)return document.body;
+  /* Opening a repost lands on a page that is a scrollable FEED, not a single
+     video: several videos' action rails are in the DOM at once. Scope to the
+     player actually on screen, or we risk un-reposting somebody else's video
+     whose share button merely happened to match first. */
+  var best=null,bestTop=1e9;
   var vids=document.querySelectorAll('video');
   for(var i=0;i<vids.length;i++){
     var v=vids[i];
     if(!vis(v))continue;
     var r=v.getBoundingClientRect();
     if(r.height<200)continue;              /* a grid thumbnail, not the player */
-    var n=v;
-    for(var k=0;k<6&&n.parentNode&&n.parentNode!==document.body;k++)n=n.parentNode;
-    return n;
+    if(r.bottom<80||r.top>window.innerHeight-80)continue;   /* off screen */
+    var d=Math.abs(r.top);
+    if(d<bestTop){bestTop=d;best=v;}
   }
+  if(best){
+    var n=best;
+    for(var k=0;k<8&&n.parentNode&&n.parentNode!==document.body;k++){
+      n=n.parentNode;
+      if(hasShare(n))return n;             /* the rail for THIS video */
+    }
+    return best.parentNode||null;
+  }
+  if(location.pathname.indexOf('/video/')>=0)return document.body;
   return null;
 }
 
@@ -536,6 +555,14 @@ async function removeOne(item){
   tap(item.el);
   var scope=await until(videoOpen,6000);
   if(!scope)throw new Error('video view did not open');
+  /* Landing on a feed means the wrong video can be under the controls. If the
+     URL names a video, it must be the one we opened - refuse rather than
+     un-repost a stranger's video. */
+  var id=shortId(item.url);
+  if(location.pathname.indexOf('/video/')>=0&&location.pathname.indexOf(id)<0){
+    await closeModal();
+    throw new Error('landed on a different video');
+  }
   var btn=await locateRepost(scope);
   if(!btn)throw new Error('repost button not found');
   if(isReposted(btn)===false){await closeModal();return 'already';}
