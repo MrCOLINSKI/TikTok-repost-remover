@@ -162,6 +162,25 @@ function matches(n,word){
            (n.getAttribute('title')||'')+' '+txt).toLowerCase();
   return hay.indexOf(word)>=0;
 }
+/* The Reposts TAB is deliberately excluded from candidates(), because
+   clicking it and reading "repost" back off it fakes a successful removal.
+   But we do need to find it once, to switch the grid to reposts - so look
+   for it separately and only among things that are actually tabs. */
+function findRepostTab(){
+  var named=pick(S.repostTab);
+  if(named)return named;
+  var nodes=document.querySelectorAll('[role="tab"],[data-e2e*="tab"],p,span,h2,div[class]');
+  for(var i=0;i<nodes.length;i++){
+    var n=nodes[i];
+    if(ui.wrap&&ui.wrap.contains(n))continue;
+    if(!vis(n))continue;
+    if(n.querySelectorAll('*').length>3)continue;
+    var t='';
+    try{t=(n.innerText||'').trim().toLowerCase();}catch(e){}
+    if(t==='reposts'||t==='repost')return n;
+  }
+  return null;
+}
 function findByWord(word,root){
   var list=candidates(root).filter(function(n){return matches(n,word);});
   if(!list.length)return null;
@@ -335,6 +354,7 @@ function record(item,out){
    the selectors can be corrected from a screenshot of this log. */
 async function doProbe(){
   if(running)return;
+  homePath=location.pathname;
   var q=pending();
   if(!q.length){say('Scan first.','warn');return;}
   running=true;stopped=false;refresh();
@@ -361,7 +381,28 @@ async function doProbe(){
       say('no matches. data-e2e values present: '+all.length);
       for(var j=0;j<Math.min(all.length,14);j++)say('  '+all[j].getAttribute('data-e2e'));
     }
+    /* The repost control is usually not on the video view at all - it lives
+       in the share sheet. Open it and list what is really in there, since
+       that is the half that decides whether removal can work. */
+    var share=pick(S.shareBtn,scope||document)||findByWord('share',scope||document);
+    if(share){
+      say('opening share sheet...');
+      tap(share);
+      await wait(1800);
+      var sheet=candidates(document);
+      say('after share, controls: '+sheet.length);
+      var rp=[];
+      for(var k=0;k<sheet.length;k++)if(matches(sheet[k],'repost'))rp.push(sheet[k]);
+      say('saying repost: '+rp.length);
+      for(var m=0;m<Math.min(rp.length,6);m++)say('  R '+describe(rp[m]));
+      if(!rp.length){
+        for(var z=0;z<Math.min(sheet.length,12);z++)say('  '+describe(sheet[z]));
+      }
+    }else{
+      say('no share control found either','err');
+    }
     say('Screenshot this and send it back.','ok');
+    await closeModal();
   }catch(e){say('Probe failed: '+e.message,'err');}
   running=false;refresh();
 }
@@ -413,7 +454,7 @@ async function doScan(){
       say('Open YOUR profile first (the Profile tab), then Scan.','err');
       return;
     }
-    var tab=pick(S.repostTab);
+    var tab=findRepostTab();
     if(tab){tap(tab);say('Opened the Reposts tab.');await wait(2500);}
     else say('No Reposts tab found - scanning whatever grid is showing.','warn');
 
@@ -580,7 +621,7 @@ async function doAll(){
   stats={done:0,ok:0,fail:0,skip:0,total:cap};
   found=[];refresh();
 
-  var tab=pick(S.repostTab);
+  var tab=findRepostTab();
   if(tab){tap(tab);await wait(1500);}
   say('Running at '+speed+' pace. Keep this tab open and the screen awake.','warn');
 
