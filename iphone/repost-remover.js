@@ -27,9 +27,16 @@ var S={
 };
 var ACTIVE=['undo','remove','reposted','cancel'];
 var LEDGER_KEY='ttrr_removed_v1';
-var MIN_DELAY=3000,MAX_DELAY=8000,ATTEMPTS=3,DEFAULT_CAP=200;
+var MIN_DELAY=3000,MAX_DELAY=8000,ATTEMPTS=3,DEFAULT_CAP=25;
+/* iOS Safari kills the tab when memory runs out, and every tile the feed
+   loads holds a video decoder. So scan a batch, clear it, reload, repeat -
+   never the whole feed at once. */
+var MAX_TILES=40;
 
 var stopped=false,running=false,found=[],stats={done:0,ok:0,fail:0,skip:0,total:0};
+/* Failures stay out of the ledger so a later run retries them, but within
+   this session we step past them, or Remove 1 would jam on the same one. */
+var failedHere={};
 
 /* ---- tiny helpers ---- */
 function vis(el){if(!el)return false;var r=el.getBoundingClientRect();return r.width>0&&r.height>0;}
@@ -60,6 +67,19 @@ async function wait(ms){
   return true;
 }
 function rnd(a,b){return Math.floor(a+Math.random()*(b-a));}
+/* The single biggest memory win on iOS: drop the decoder behind every video
+   the feed has loaded. TikTok reattaches a source when one is actually
+   played, so this only reclaims what is sitting idle in the grid. */
+function freeVideos(){
+  var v=document.querySelectorAll('video'),n=0;
+  for(var i=0;i<v.length;i++){
+    try{
+      if(!v[i].paused)v[i].pause();
+      if(v[i].getAttribute('src')){v[i].removeAttribute('src');v[i].load();n++;}
+    }catch(e){}
+  }
+  return n;
+}
 function tap(el){
   if(!el)return;
   el.scrollIntoView({block:'center'});
@@ -125,10 +145,12 @@ function build(){
     return b;
   }
   var bScan=mk('Scan','rgb(34,38,52)','rgb(232,234,239)');
-  var bRun=mk('Remove all','rgb(254,44,85)','rgb(255,255,255)');
+  var bOne=mk('Remove 1','rgb(34,38,52)','rgb(232,234,239)');
+  var bRun=mk('Remove batch','rgb(254,44,85)','rgb(255,255,255)');
   var bStop=mk('Stop','transparent','rgb(232,234,239)');
+  bOne.style.borderColor='rgb(254,44,85)';
   hide.setAttribute('style','min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgb(48,52,66);background:transparent;color:rgb(154,161,177);font:inherit');
-  row.appendChild(bScan);row.appendChild(bRun);row.appendChild(bStop);
+  row.appendChild(bScan);row.appendChild(bOne);row.appendChild(bRun);row.appendChild(bStop);
 
   var capRow=document.createElement('div');
   capRow.setAttribute('style','display:flex;align-items:center;gap:8px;margin-bottom:10px;color:rgb(154,161,177)');
@@ -145,9 +167,10 @@ function build(){
   wrap.appendChild(row);wrap.appendChild(capRow);wrap.appendChild(logBox);
   document.body.appendChild(wrap);
 
-  ui={wrap:wrap,stat:stat,bar:barInner,log:logBox,cap:cap,scan:bScan,run:bRun,stop:bStop,hide:hide};
+  ui={wrap:wrap,stat:stat,bar:barInner,log:logBox,cap:cap,scan:bScan,one:bOne,run:bRun,stop:bStop,hide:hide};
 
   bScan.onclick=function(){doScan();};
+  bOne.onclick=function(){doOne();};
   bRun.onclick=function(){doRun();};
   bStop.onclick=function(){stopped=true;say('Stopping after this one.','warn');};
   hide.onclick=function(){
@@ -168,13 +191,59 @@ function say(msg,level){
   ui.log.scrollTop=ui.log.scrollHeight;
 }
 function refresh(){
-  ui.stat.textContent=stats.done+' of '+stats.total+'   ok '+stats.ok+'   failed '+stats.fail+'   skipped '+stats.skip;
+  var left=found.length?pending().length:0;
+  ui.stat.textContent=stats.done+' done   ok '+stats.ok+'   failed '+stats.fail+'   left '+left;
   var f=stats.total?stats.done/stats.total:0;
   ui.bar.style.transform='scaleX('+f+')';
-  ui.run.disabled=running||!found.length;
+  ui.run.disabled=running||!left;
+  ui.one.disabled=running||!left;
   ui.scan.disabled=running;
-  ui.run.style.opacity=ui.run.disabled?'0.45':'1';
-  ui.scan.style.opacity=ui.scan.disabled?'0.45':'1';
+  [ui.run,ui.one,ui.scan].forEach(function(b){b.style.opacity=b.disabled?'0.45':'1';});
+}
+
+/* Everything scanned that this phone has not already taken off, and that has
+   not failed since the panel was opened. */
+function pending(){
+  var already=ledger();
+  return found.filter(function(f){return already.indexOf(f.url)<0&&!failedHere[f.url];});
+}
+function shortId(url){var p=url.split('/video/');return p[1]||url;}
+
+/* One attempt at one repost, shared by both buttons. */
+async function attempt(item){
+  var err='';
+  for(var a=1;a<=ATTEMPTS;a++){
+    if(stopped)break;
+    try{return {res:await removeOne(item),err:''};}
+    catch(e){
+      err=e.message;
+      say('  try '+a+' of '+ATTEMPTS+': '+err,'warn');
+      if(a<ATTEMPTS)await wait(rnd(2000,4000));
+    }
+  }
+  return {res:null,err:err};
+}
+function record(item,out){
+  stats.done++;
+  if(out.res==='ok'||out.res==='already'){stats.ok++;remember(item.url);say('  removed','ok');}
+  else{stats.fail++;failedHere[item.url]=true;say('  failed: '+out.err,'err');}
+  freeVideos();
+  refresh();
+}
+
+/* Remove exactly one and stop. Lightest possible on memory, and you decide
+   the pace - the safest mode on a phone that has been crashing. */
+async function doOne(){
+  if(running)return;
+  var q=pending();
+  if(!q.length){say('Nothing left in this batch. Reload and scan again.','warn');return;}
+  running=true;stopped=false;refresh();
+  var item=q[0];
+  say('Removing '+shortId(item.url)+'  ('+q.length+' left)');
+  try{record(item,await attempt(item));}
+  catch(e){say('Failed: '+e.message,'err');}
+  running=false;refresh();
+  if(!pending().length)say('Batch clear. Reload the page, then scan again.','ok');
 }
 
 /* ---- is this repost currently on ---- */
@@ -208,22 +277,27 @@ async function doScan(){
     if(tab){tap(tab);say('Opened the Reposts tab.');await wait(2500);}
     else say('No Reposts tab found - scanning whatever grid is showing.','warn');
 
-    var seen={},stagnant=0;
-    while(stagnant<4&&!stopped){
+    var seen={},stagnant=0,capped=false;
+    while(stagnant<4&&!stopped&&!capped){
       var links=pickAll(S.tile);
       var added=0;
       for(var i=0;i<links.length;i++){
         var href=(links[i].href||'').split('?')[0];
         if(href&&href.indexOf('/video/')>0&&!seen[href]){
           seen[href]=true;found.push({url:href,el:links[i]});added++;
+          if(found.length>=MAX_TILES){capped=true;break;}
         }
       }
       if(added){stagnant=0;say('Found '+found.length+' so far.');}
       else stagnant++;
       stats.total=found.length;refresh();
+      if(capped)break;
       window.scrollBy(0,window.innerHeight*2);
       await wait(1400);
+      freeVideos();
     }
+    freeVideos();
+    if(capped)say('Stopped at '+MAX_TILES+' to keep Safari alive. Clear these, reload, scan again.','warn');
     say('Scan done: '+found.length+' reposts.','ok');
   }catch(e){say('Scan failed: '+e.message,'err');}
   finally{running=false;stats.total=found.length;refresh();}
@@ -263,10 +337,8 @@ async function closeModal(){
 async function doRun(){
   if(running||!found.length)return;
   var cap=Math.max(1,parseInt(ui.cap.value,10)||DEFAULT_CAP);
-  var already=ledger();
-  var queue=found.filter(function(f){return already.indexOf(f.url)<0;});
-  stats.skip=found.length-queue.length;
-  if(queue.length>cap){say('Cap '+cap+' - '+(queue.length-cap)+' left for next time.');queue=queue.slice(0,cap);}
+  var queue=pending();
+  if(queue.length>cap){say('Cap '+cap+' - '+(queue.length-cap)+' left for the next batch.');queue=queue.slice(0,cap);}
   if(!confirm('Remove '+queue.length+' repost'+(queue.length===1?'':'s')+' from your account. This cannot be undone.'))return;
 
   running=true;stopped=false;
@@ -275,18 +347,11 @@ async function doRun(){
 
   for(var i=0;i<queue.length;i++){
     if(stopped){say('Stopped.','warn');break;}
-    var item=queue[i],res=null,err='';
-    say('['+(i+1)+' of '+queue.length+'] '+item.url.split('/video/')[1]);
-    for(var a=1;a<=ATTEMPTS;a++){
-      if(stopped)break;
-      try{res=await removeOne(item);break;}
-      catch(e){err=e.message;say('  try '+a+' of '+ATTEMPTS+': '+err,'warn');if(a<ATTEMPTS)await wait(rnd(2000,4000));}
-    }
-    if(stopped&&!res)break;
-    stats.done++;
-    if(res==='ok'||res==='already'){stats.ok++;remember(item.url);say('  removed','ok');}
-    else{stats.fail++;say('  failed: '+err,'err');}
-    refresh();
+    var item=queue[i];
+    say('['+(i+1)+' of '+queue.length+'] '+shortId(item.url));
+    var out=await attempt(item);
+    if(stopped&&!out.res)break;
+    record(item,out);
     if(i<queue.length-1&&!stopped){
       var d=rnd(MIN_DELAY,MAX_DELAY);
       say('  waiting '+Math.round(d/1000)+'s');
@@ -294,8 +359,8 @@ async function doRun(){
     }
   }
   running=false;refresh();
-  say('Finished. '+stats.ok+' removed, '+stats.fail+' failed.','ok');
-  say('Pull down to refresh the page, then Scan again to check.','info');
+  say('Batch done. '+stats.ok+' removed, '+stats.fail+' failed.','ok');
+  say('Reload the page, then tap the bookmark and Scan for the next batch.','info');
 }
 
 build();

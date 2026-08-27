@@ -27,9 +27,22 @@ those eleven characters back in by hand at the front.
 1. Safari → **tiktok.com**, logged in.
 2. Go to **your own profile** (the URL has to start with `/@`).
 3. Tap the bookmarks icon → tap **Remove reposts**. The panel appears.
-4. **Scan** — it opens your Reposts tab and scrolls to the bottom collecting
-   everything.
-5. **Remove all** — confirm the count, then leave it alone and watch.
+4. **Scan** — opens your Reposts tab and collects up to 40 at a time.
+5. **Remove 1** for one repost per tap, or **Remove batch** for the whole
+   scanned batch.
+6. When the batch is clear, **reload the page**, tap the bookmark, and scan
+   again for the next 40.
+
+### Why it works in batches
+
+iOS Safari kills a tab that runs out of memory, and every tile TikTok's feed
+loads holds a video decoder. Scrolling an entire Reposts feed in one go will
+crash the tab on a large account — so a scan stops at 40, the panel drops the
+video sources it can as it scrolls, and reloading between batches hands the
+memory back.
+
+If it still gets sluggish, use **Remove 1**. It touches the least, and you set
+the pace.
 
 **Set Auto-Lock to Never first** (Settings → Display & Brightness → Auto-Lock).
 Safari pauses timers when the screen locks or you switch apps, which stalls the
