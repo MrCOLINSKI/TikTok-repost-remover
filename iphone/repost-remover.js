@@ -22,6 +22,7 @@ var S={
   tile:['[data-e2e="user-post-item"] a[href*="/video/"]','[data-e2e="user-post-item-list"] a[href*="/video/"]','a[href*="/video/"]'],
   modal:['[data-e2e="browse-video"]','div[role="dialog"]','[class*="ModalContainer"]','[id^="tux-portal"] div[role="dialog"]'],
   repostBtn:['[data-e2e="repost-icon"]','button[data-e2e="repost-icon"]','div[data-e2e="repost-icon"]','[data-e2e="browse-repost"]','button[aria-label*="epost"]','div[aria-label*="epost"]'],
+  shareBtn:['[data-e2e="share-icon"]','[data-e2e="browse-share"]','[data-e2e="undefined-share"]','button[aria-label*="hare"]','div[aria-label*="hare"]'],
   confirmBtn:['button[data-e2e="repost-remove-confirm"]','div[role="dialog"] button','[class*="Modal"] button'],
   closeModal:['[data-e2e="browse-close"]','[data-e2e="modal-close-inner-button"]','button[aria-label*="lose"]','div[aria-label*="lose"]']
 };
@@ -88,6 +89,65 @@ function tap(el){
   });
 }
 
+/* ---- finding the repost control the hard way -------------------------
+   Fixed selectors keep missing, because TikTok ships several video layouts
+   and renames data-e2e values freely. So instead of naming the button, look
+   for any visible control that says "repost" in its data-e2e, aria-label,
+   title or text, and take the most specific one - the smallest matching
+   element, so we click the button and not the panel wrapping it. */
+function candidates(root){
+  root=root||document;
+  var sel='button,[role="button"],[data-e2e],a,span[class],div[class]';
+  var nodes=root.querySelectorAll(sel),out=[];
+  for(var i=0;i<nodes.length;i++){
+    var n=nodes[i];
+    if(ui.wrap&&ui.wrap.contains(n))continue;
+    if(!vis(n))continue;
+    /* Must plausibly BE a control, not merely contain one. Without this a
+       whole modal matches on the text of something buried inside it, and we
+       end up clicking the container and reading its state - which silently
+       reports success while nothing happened. */
+    var control=n.tagName==='BUTTON'||n.tagName==='A'||
+                n.getAttribute('role')==='button'||n.hasAttribute('data-e2e');
+    if(!control)continue;
+    if(n.querySelectorAll('*').length>8)continue;
+    /* The profile's own Reposts TAB says "repost" too. Clicking it and then
+       reading "repost" back off it looks exactly like a successful removal,
+       so tabs and grid tiles are never candidates. */
+    var e2e=(n.getAttribute('data-e2e')||'').toLowerCase();
+    if(e2e.indexOf('tab')>=0)continue;
+    if(n.getAttribute('role')==='tab')continue;
+    if(n.tagName==='A'&&(n.getAttribute('href')||'').indexOf('/video/')>=0)continue;
+    out.push(n);
+  }
+  return out;
+}
+function describe(n){
+  return [n.tagName.toLowerCase(),
+    n.getAttribute('data-e2e')||'',
+    n.getAttribute('aria-label')||'',
+    n.getAttribute('title')||'',
+    (n.textContent||'').slice(0,40)].join(' | ');
+}
+function matches(n,word){
+  /* innerText, not textContent: it excludes text inside hidden panels, which
+     would otherwise match a control that is not on screen yet. */
+  var txt='';
+  try{txt=n.innerText||'';}catch(e){txt=n.textContent||'';}
+  var hay=((n.getAttribute('data-e2e')||'')+' '+
+           (n.getAttribute('aria-label')||'')+' '+
+           (n.getAttribute('title')||'')+' '+txt).toLowerCase();
+  return hay.indexOf(word)>=0;
+}
+function findByWord(word,root){
+  var list=candidates(root).filter(function(n){return matches(n,word);});
+  if(!list.length)return null;
+  list.sort(function(a,b){
+    return a.querySelectorAll('*').length-b.querySelectorAll('*').length;
+  });
+  return list[0];
+}
+
 /* ---- ledger, kept in this device's localStorage ---- */
 function ledger(){
   try{return JSON.parse(localStorage.getItem(LEDGER_KEY)||'[]');}catch(e){return [];}
@@ -118,9 +178,11 @@ function build(){
   var title=document.createElement('b');
   title.textContent='Repost remover';
   title.setAttribute('style','font-size:14px;flex:1');
+  var probe=document.createElement('button');
+  probe.textContent='Probe';
   var hide=document.createElement('button');
   hide.textContent='Hide';
-  head.appendChild(title);head.appendChild(hide);
+  head.appendChild(title);head.appendChild(probe);head.appendChild(hide);
 
   var stat=document.createElement('div');
   stat.setAttribute('style','font-variant-numeric:tabular-nums;color:rgb(154,161,177);margin-bottom:8px');
@@ -149,7 +211,10 @@ function build(){
   var bRun=mk('Remove batch','rgb(254,44,85)','rgb(255,255,255)');
   var bStop=mk('Stop','transparent','rgb(232,234,239)');
   bOne.style.borderColor='rgb(254,44,85)';
-  hide.setAttribute('style','min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgb(48,52,66);background:transparent;color:rgb(154,161,177);font:inherit');
+  var smallBtn='min-height:34px;padding:0 12px;border-radius:8px;border:1px solid rgb(48,52,66);background:transparent;color:rgb(154,161,177);font:inherit';
+  hide.setAttribute('style',smallBtn);
+  probe.setAttribute('style',smallBtn);
+  probe.onclick=function(){doProbe();};
   row.appendChild(bScan);row.appendChild(bOne);row.appendChild(bRun);row.appendChild(bStop);
 
   var capRow=document.createElement('div');
@@ -231,6 +296,35 @@ function record(item,out){
   refresh();
 }
 
+/* Opens the first repost and reports what controls the page actually has, so
+   the selectors can be corrected from a screenshot of this log. */
+async function doProbe(){
+  if(running)return;
+  var q=pending();
+  if(!q.length){say('Scan first.','warn');return;}
+  running=true;stopped=false;refresh();
+  try{
+    say('Probe: opening '+shortId(q[0].url));
+    tap(q[0].el);
+    await wait(2200);
+    var modal=pick(S.modal);
+    say('modal found: '+(modal?'yes':'no - searching whole page'));
+    var hits=candidates(modal||document).filter(function(n){
+      return matches(n,'repost')||matches(n,'share')||matches(n,'like')||matches(n,'favorite');
+    });
+    hits.sort(function(a,b){return a.querySelectorAll('*').length-b.querySelectorAll('*').length;});
+    say('controls matched: '+hits.length);
+    for(var i=0;i<Math.min(hits.length,10);i++)say('  '+describe(hits[i]));
+    if(!hits.length){
+      var all=candidates(modal||document).filter(function(n){return n.getAttribute('data-e2e');});
+      say('no matches. data-e2e values present: '+all.length);
+      for(var j=0;j<Math.min(all.length,14);j++)say('  '+all[j].getAttribute('data-e2e'));
+    }
+    say('Screenshot this and send it back.','ok');
+  }catch(e){say('Probe failed: '+e.message,'err');}
+  running=false;refresh();
+}
+
 /* Remove exactly one and stop. Lightest possible on memory, and you decide
    the pace - the safest mode on a phone that has been crashing. */
 async function doOne(){
@@ -304,11 +398,32 @@ async function doScan(){
 }
 
 /* ---- remove one, using the in-page modal so we never navigate away ---- */
+/* Named selectors first, then the search by meaning, then the share menu -
+   on some layouts Repost only exists inside the share sheet. */
+async function locateRepost(){
+  /* Search inside the opened video only. A page-wide search finds the
+     profile's own controls and produces confident nonsense. */
+  var scope=pick(S.modal);
+  if(!scope)return null;
+  var btn=pick(S.repostBtn,scope)||findByWord('repost',scope);
+  if(btn)return btn;
+  var share=pick(S.shareBtn,scope)||findByWord('share',scope);
+  if(share){
+    say('  no repost control - opening share');
+    tap(share);
+    await wait(1400);
+    scope=pick(S.modal)||scope;
+    btn=pick(S.repostBtn,scope)||findByWord('repost',scope);
+    if(btn)return btn;
+  }
+  return null;
+}
+
 async function removeOne(item){
   tap(item.el);
   await wait(1800);
-  var modal=pick(S.modal)||document;
-  var btn=pick(S.repostBtn,modal)||pick(S.repostBtn);
+  if(!pick(S.modal))throw new Error('video view did not open');
+  var btn=await locateRepost();
   if(!btn)throw new Error('repost button not found');
   if(isReposted(btn)===false){await closeModal();return 'already';}
   tap(btn);
@@ -320,7 +435,7 @@ async function removeOne(item){
     if(t.indexOf('remove')>=0||t.indexOf('undo')>=0||t.indexOf('confirm')>=0){tap(dlg);await wait(1200);}
   }
 
-  var after=isReposted(pick(S.repostBtn,pick(S.modal)||document)||pick(S.repostBtn));
+  var after=isReposted(await locateRepost());
   await closeModal();
   if(after===false)return 'ok';
   if(after===null)throw new Error('could not verify it flipped');
