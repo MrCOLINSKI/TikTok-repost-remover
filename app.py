@@ -6,19 +6,30 @@ Single entry point:  python app.py
 Starts a FastAPI server bound strictly to 127.0.0.1:8731, opens the UI in your
 default browser, and drives a HEADED Chromium window via Playwright.
 
+    python app.py            loopback only  — nothing off this machine reaches it
+    python app.py --phone    home network   — open it on your iPhone
+
 Design constraints (do not change):
-  * 127.0.0.1 only. Never 0.0.0.0, never deployed.
-  * No auth, no accounts, no multi-user. One person, one machine.
+  * `python app.py` is 127.0.0.1 only. Never 0.0.0.0, never deployed.
+  * --phone binds to THIS MACHINE'S OWN LAN ADDRESS ONLY (still never 0.0.0.0)
+    and gates every request behind a random token regenerated on each start. It
+    is a LAN convenience, not a deployment: the browser automation and your
+    TikTok session never leave this computer.
+  * No accounts, no multi-user. One person. The --phone token is a door key for
+    that one person, not a login.
   * No credentials anywhere. You log in by hand in the real browser window.
   * Never headless.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
 import random
+import secrets
+import socket
 import sys
 import threading
 import time
@@ -29,8 +40,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -112,8 +128,15 @@ REPOST_ACTIVE_HINTS = ("undo", "remove", "reposted", "cancel")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-HOST = "127.0.0.1"  # never anything else
+LOOPBACK = "127.0.0.1"
 PORT = 8731
+
+# Set by main(). HOST is either 127.0.0.1 (default) or this machine's own LAN
+# address under --phone. It is NEVER 0.0.0.0 — binding one known interface
+# instead of every interface is the whole point.
+HOST = LOOPBACK
+PHONE_MODE = False
+ACCESS_TOKEN = ""  # random per start; only exists, and only checked, under --phone
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "tiktok-profile"
 LEDGER_PATH = BASE_DIR / "removed.jsonl"
@@ -736,6 +759,46 @@ async def _start_job(coro) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Network / phone mode
+# ---------------------------------------------------------------------------
+def lan_address() -> Optional[str]:
+    """This machine's LAN address, or None if it isn't on a network.
+
+    Uses a UDP socket to a public address purely to ask the OS which local
+    interface would be used — no packet is ever sent.
+    """
+    for probe in ("192.168.255.255", "8.8.8.8"):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((probe, 9))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+        except OSError:
+            continue
+        finally:
+            s.close()
+    return None
+
+
+def base_url(token: bool = True) -> str:
+    url = f"http://{HOST}:{PORT}/"
+    if token and PHONE_MODE and ACCESS_TOKEN:
+        url += f"?t={ACCESS_TOKEN}"
+    return url
+
+
+def _token_ok(request: Request) -> bool:
+    supplied = (
+        request.query_params.get("t")
+        or request.headers.get("x-access-token")
+        or request.cookies.get("ttrr_token")
+        or ""
+    )
+    return bool(supplied) and secrets.compare_digest(supplied, ACCESS_TOKEN)
+
+
+# ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
 @asynccontextmanager
@@ -744,7 +807,8 @@ async def lifespan(app: FastAPI):
     global STOP, JOB_LOCK
     STOP = asyncio.Event()
     JOB_LOCK = asyncio.Lock()
-    BUS.log(f"Server listening on http://{HOST}:{PORT} (localhost only)")
+    where = "your home network — token required" if PHONE_MODE else "this machine only"
+    BUS.log(f"Server listening on http://{HOST}:{PORT} ({where})")
     yield
     STOP.set()
     await TT.close()
@@ -753,13 +817,76 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="TikTok Repost Remover", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    """Loopback mode: wide open, as specified — only this machine can connect.
+
+    Phone mode: every request must carry the per-start token, and the Host
+    header must be the address we actually bound (blocks DNS rebinding, where
+    a hostile page resolves its own domain to your LAN IP to reach this API).
+    """
+    if not PHONE_MODE:
+        return await call_next(request)
+
+    host = (request.headers.get("host") or "").split(":")[0]
+    if host not in (HOST, LOOPBACK, "localhost"):
+        return PlainTextResponse("Bad Host header.", status_code=400)
+
+    if not _token_ok(request):
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "Bad or missing token."}, status_code=401)
+        return PlainTextResponse(
+            "This link needs the access code shown in the app on your computer.\n"
+            "Scan the QR code there, or re-copy the full URL including ?t=...",
+            status_code=401,
+        )
+
+    response = await call_next(request)
+    # Remember the token so refreshes and SSE reconnects work without the query
+    # string. Same-origin, HttpOnly, dies with the browser session.
+    if request.query_params.get("t"):
+        response.set_cookie(
+            "ttrr_token",
+            ACCESS_TOKEN,
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 12,
+        )
+    return response
+
+
 class RemoveRequest(BaseModel):
     cap: int = DEFAULT_CAP
 
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/api/access")
+async def api_access():
+    """What the desktop UI needs to render the 'open on your phone' panel."""
+    if not PHONE_MODE:
+        return {
+            "phone_mode": False,
+            "url": base_url(),
+            "hint": "Loopback only. Start with --phone (or run-phone.sh) "
+            "to open this on your iPhone.",
+        }
+    url = base_url()
+    svg = ""
+    try:
+        import segno
+
+        svg = segno.make(url, error="m").svg_inline(
+            scale=5, border=2, dark="#0e0f13", light="#ffffff"
+        )
+    except Exception:
+        pass  # QR is a nicety; the URL still works
+    return {"phone_mode": True, "url": url, "qr_svg": svg}
 
 
 @app.get("/api/status")
@@ -847,21 +974,63 @@ def _open_browser_soon() -> None:
     def go():
         time.sleep(1.2)
         try:
-            webbrowser.open(f"http://{HOST}:{PORT}")
+            webbrowser.open(base_url())
         except Exception:
             pass
 
     threading.Thread(target=go, daemon=True).start()
 
 
+def _print_phone_banner() -> None:
+    url = base_url()
+    print("\n  Open this on your iPhone (same Wi-Fi):\n")
+    try:
+        import segno
+
+        segno.make(url, error="m").terminal(compact=True, border=2)
+    except Exception:
+        pass
+    print(f"\n  {url}\n")
+    print("  The code changes every time you start the app, and only works on")
+    print("  your own network. Ctrl-C here and the phone loses access.\n")
+
+
 def main() -> None:
+    global HOST, PORT, PHONE_MODE, ACCESS_TOKEN
     import uvicorn
+
+    parser = argparse.ArgumentParser(description="TikTok Repost Remover")
+    parser.add_argument(
+        "--phone",
+        "--lan",
+        dest="phone",
+        action="store_true",
+        help="serve on your home network so you can open it on your iPhone "
+        "(binds this machine's LAN address only, token required)",
+    )
+    parser.add_argument("--port", type=int, default=PORT)
+    args = parser.parse_args()
 
     if not (STATIC_DIR / "index.html").exists():
         sys.exit(f"Missing {STATIC_DIR / 'index.html'}")
+
+    PORT = args.port
+    if args.phone:
+        ip = lan_address()
+        if not ip:
+            sys.exit(
+                "Could not find a LAN address — are you on Wi-Fi?\n"
+                "Without one there is nothing for the phone to connect to. "
+                "Run `python app.py` for local-only use."
+            )
+        HOST = ip  # a single real interface; never 0.0.0.0
+        PHONE_MODE = True
+        ACCESS_TOKEN = secrets.token_urlsafe(16)
+        _print_phone_banner()
+
     if os.environ.get("TTRR_NO_BROWSER") != "1":
         _open_browser_soon()
-    # host is hard-coded: localhost only, never 0.0.0.0.
+    # HOST is 127.0.0.1, or this machine's own LAN IP under --phone. Never 0.0.0.0.
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
 
 

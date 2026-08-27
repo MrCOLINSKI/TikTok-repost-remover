@@ -1,8 +1,11 @@
 # TikTok Repost Remover
 
 A local-only desktop app that removes every repost from your own TikTok
-account. It runs on your machine, binds to `127.0.0.1` only, and is never
-deployed anywhere.
+account. It runs on your machine and is never deployed anywhere.
+
+By default it binds `127.0.0.1` only. With `--phone` it serves itself on your
+home network so you can **drive it from your iPhone** — see
+[Using it from your iPhone](#using-it-from-your-iphone).
 
 ## What it does
 
@@ -40,6 +43,52 @@ python app.py
 
 `python app.py` is the single entry point: it starts the server on
 <http://127.0.0.1:8731> and opens that URL in your default browser.
+
+## Using it from your iPhone
+
+```bash
+./run-phone.sh    # macOS / Linux — double-clickable
+run-phone.bat     # Windows — double-clickable
+# same as: python app.py --phone
+```
+
+The terminal prints a QR code and a URL. Point your iPhone camera at the QR,
+tap the banner, and the full UI opens in Safari — status, scan, remove, live
+progress, log, all of it. The computer's own browser opens the same page, with
+an **Open on your phone** panel showing the QR again.
+
+For a more app-like feel: Safari → Share → **Add to Home Screen**. It launches
+full-screen with no address bar.
+
+### What the phone can and can't do
+
+The phone is a **remote control**, not the worker. Playwright drives a real
+Chromium window on your computer — there's no iOS equivalent, and the TikTok
+iOS app can't be automated. So the computer must stay awake and running the
+app; the phone starts, watches, and stops the run.
+
+That also means the first login has to happen at the computer, since that's
+where the browser window opens.
+
+### How `--phone` is secured
+
+- Binds **your machine's own LAN address**, e.g. `192.168.1.x` — never
+  `0.0.0.0`, so it's on one interface, not every one.
+- Every request needs a random access code generated fresh at each start. Quit
+  the app and old links are dead. The code lives in the QR link, then in a
+  same-origin `HttpOnly` cookie.
+- Requests with a `Host` header that isn't the bound address are rejected, so a
+  hostile web page can't reach the API through DNS rebinding.
+- It's still HTTP on your own LAN — fine for a home network, not something to
+  expose to the internet. Don't port-forward it. On public Wi-Fi, stick to
+  plain `python app.py`.
+
+To reach it from *outside* your home, don't open a port — put the machine and
+the phone on a [Tailscale](https://tailscale.com) network and use the machine's
+Tailscale IP. Nothing about the app has to change.
+
+`python app.py` with no flag is completely unchanged: loopback only, no token,
+nothing off the machine can connect.
 
 ## Using it
 
@@ -84,8 +133,14 @@ browser window and start again.
 
 ## Deliberate non-features
 
-No auth, no accounts, no multi-user — it's one person on localhost. No password
-storage of any kind. No headless mode. No binding to anything but `127.0.0.1`.
+No accounts, no multi-user, no password storage of any kind, no headless mode,
+and no public deployment — the automation and your TikTok session never leave
+this computer.
+
+`--phone` adds exactly one thing to that list: a single shared access code, so
+that serving the page on your LAN doesn't hand the controls to everything else
+on the Wi-Fi. It's a door key for the one person using this, not a login
+system. Without `--phone` there is no token and no LAN listener at all.
 
 ## Caution
 
